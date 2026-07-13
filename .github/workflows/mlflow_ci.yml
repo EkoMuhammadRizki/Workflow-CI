@@ -1,4 +1,4 @@
-name: MLflow CI - Training & Artifact Backup
+name: MLflow CI - Training & Docker Build
 
 on:
   push:
@@ -36,39 +36,38 @@ jobs:
           mkdir -p MLProject/artifacts
           mkdir -p MLProject/mlruns
 
-      # ── Step 5: Start MLflow Tracking Server ───────────────
-      - name: Start MLflow server
+      # ── Step 5: Execute MLflow Run ─────────────────────────
+      # Menggunakan 'mlflow run' sesuai modul Cinta Segitiga:
+      # MLflow, Docker, dan GitHub
+      - name: Execute MLflow run
         run: |
-          mlflow server \
-            --host 127.0.0.1 \
-            --port 5000 \
-            --backend-store-uri sqlite:///mlflow.db \
-            --default-artifact-root ./MLProject/mlruns &
+          echo "=========================================="
+          echo "Running MLflow Project Pipeline"
+          echo "=========================================="
           
-          # Wait for server to start
-          echo "Waiting for MLflow server to start..."
-          for i in {1..30}; do
-            if curl -s http://127.0.0.1:5000/health > /dev/null 2>&1; then
-              echo "MLflow server is ready!"
-              break
-            fi
-            sleep 1
-          done
+          # Jalankan MLflow run dengan env-manager local
+          # karena dependencies sudah di-install via pip
+          mlflow run MLProject/ \
+            --env-manager local \
+            --experiment-name telco-churn-baseline \
+            -P n_estimators=100 \
+            -P max_depth=10
+          
+          echo "=========================================="
+          echo "MLflow run completed successfully!"
+          echo "=========================================="
 
-      # ── Step 6: Execute MLflow Training ────────────────────
-      - name: Execute MLflow training
+      # ── Step 6: Verify Artifacts ───────────────────────────
+      - name: Verify MLflow artifacts
         run: |
-          echo "=========================================="
-          echo "Running MLflow Training Pipeline"
-          echo "=========================================="
-          
-          # Run modeling script inside MLProject folder
-          cd MLProject
-          python modelling.py
-          
-          echo "=========================================="
-          echo "Training completed successfully!"
-          echo "=========================================="
+          echo "--- Checking mlruns directory ---"
+          find MLProject/mlruns -type f | head -50 || echo "No mlruns found"
+          echo ""
+          echo "--- Checking artifacts directory ---"
+          ls -la MLProject/artifacts/ || echo "No artifacts dir"
+          echo ""
+          echo "--- Checking model folder structure ---"
+          find MLProject/mlruns -name "MLmodel" -type f | head -5
 
       # ── Step 7: Build Docker Container ─────────────────────
       - name: Build MLflow Docker container
@@ -78,10 +77,10 @@ jobs:
           echo "=========================================="
           
           # Find the latest model run inside MLProject/mlruns
-          LATEST_RUN=$(ls -td MLProject/mlruns/*/runs/*/ 2>/dev/null | head -1)
+          MODEL_PATH=$(find MLProject/mlruns -path "*/artifacts/model/MLmodel" -type f | head -1)
           
-          if [ -n "$LATEST_RUN" ] && [ -d "${LATEST_RUN}artifacts/model" ]; then
-            MODEL_URI="${LATEST_RUN}artifacts/model"
+          if [ -n "$MODEL_PATH" ]; then
+            MODEL_URI=$(dirname "$MODEL_PATH")
             echo "Building Docker image from model: $MODEL_URI"
             
             mlflow models build-docker \
@@ -92,7 +91,16 @@ jobs:
             echo "No model artifacts found, skipping Docker build"
           fi
 
-      # ── Step 8: Setup Git LFS ──────────────────────────────
+      # ── Step 8: Push Docker Image to Docker Hub ────────────
+      - name: Push to Docker Hub
+        if: github.event_name == 'push'
+        continue-on-error: true
+        run: |
+          echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin || true
+          docker tag smsml-eko-churn:latest ${{ secrets.DOCKERHUB_USERNAME }}/smsml-eko-churn:latest || true
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/smsml-eko-churn:latest || echo "Docker push skipped (credentials not configured)"
+
+      # ── Step 9: Setup Git LFS ──────────────────────────────
       - name: Setup Git LFS
         run: |
           git lfs install
@@ -102,7 +110,7 @@ jobs:
           git lfs track "MLProject/artifacts/**/*.png"
           echo "Git LFS tracking configured"
 
-      # ── Step 9: Backup Artifacts via Git Push ──────────────
+      # ── Step 10: Backup Artifacts via Git Push ─────────────
       - name: Backup artifacts to repository
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
@@ -121,7 +129,7 @@ jobs:
             echo "Artifacts pushed to repository"
           } || echo "No changes to commit"
 
-      # ── Step 10: Upload Artifacts ──────────────────────────
+      # ── Step 11: Upload Artifacts ──────────────────────────
       - name: Upload MLflow artifacts
         uses: actions/upload-artifact@v4
         with:
