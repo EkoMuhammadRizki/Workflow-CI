@@ -52,7 +52,7 @@ warnings.filterwarnings("ignore")
 # ============================================================
 # Configuration
 # ============================================================
-MLFLOW_TRACKING_URI = "sqlite:///mlflow.db"
+MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
 EXPERIMENT_NAME = "telco-churn-baseline"
 DATA_DIR = "namadataset_preprocessing"
 ARTIFACTS_DIR = "artifacts"
